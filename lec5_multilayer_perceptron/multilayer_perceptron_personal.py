@@ -1,69 +1,73 @@
 # -*- coding: utf-8 -*-
 
-from typing import Any
-import torch
-import torchvision
-from torch import nn, optim
-import lightning as L
-from torch.nn import functional as F
-from torch.utils.data import DataLoader
-
 import os
 import sys
 sys.path.append(os.path.join(os.path.curdir, '..'))
 
-from util import plot_util
+import torch
+from torch import nn, optim
+import lightning as L
+from torch.nn import functional as F
+import torchvision
+from torch.utils.data import DataLoader
 
-class CustomSoftmaxRegression(L.LightningModule):
+class MLP(L.LightningModule):
 
-    def __init__(self, num_inputs, num_outputs, lr):
+    def __init__(self, num_inputs, num_hiddens, num_outputs, lr):
         super().__init__()
-        self.lr = lr
 
         self.train_loss_epoches = {}
         self.val_loss_epoches = {}
 
-        self.net = nn.Sequential(nn.Flatten(), nn.Linear(num_inputs, num_outputs))
+        self.lr = lr
+        self.net = nn.Sequential(
+            nn.Flatten(), 
+            nn.Linear(num_inputs, num_hiddens), 
+            nn.ReLU(), 
+            # nn.Dropout(0.1),
+            nn.Linear(num_hiddens, num_outputs))
 
     def forward(self, x):
         return self.net(x)
-
+    
     def training_step(self, batch, batch_idx):
-        loss = F.cross_entropy(self(*batch[:-1]), batch[-1], reduction='mean')
+        x, y = batch
+        loss = F.cross_entropy(self(x), y)
         self.log('train_loss', loss, on_step=False, on_epoch=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
-        loss = F.cross_entropy(self(*batch[:-1]), batch[-1], reduction='mean')
+        x, y = batch
+        loss = F.cross_entropy(self(x), y)
         self.log('val_loss', loss, on_step=False, on_epoch=True)
-
+    
     def configure_optimizers(self):
-        return optim.SGD(self.parameters(), self.lr)
+        return optim.Adam(self.parameters(), self.lr)
     
     def on_train_epoch_end(self):
         avg_loss = self.trainer.callback_metrics.get('train_loss').item()
         self.train_loss_epoches[self.trainer.current_epoch] = avg_loss
 
     def on_validation_epoch_end(self):
-        avg_loss = self.trainer.callback_metrics.get('val_loss').item()
+        avg_loss = self.trainer.callback_metrics.get('val_loss').item()        
         self.val_loss_epoches[self.trainer.current_epoch] = avg_loss
-    
+
 
 transform = torchvision.transforms.Compose([
-    torchvision.transforms.Resize((28, 28)),
     torchvision.transforms.ToTensor()
 ])
+train_loader = DataLoader(
+    torchvision.datasets.FashionMNIST('../data', train=True, transform=transform),
+    batch_size=256, shuffle=True, num_workers=8
+)
+val_loader = DataLoader(
+    torchvision.datasets.FashionMNIST('../data', train=False, transform=transform),
+    batch_size=256, shuffle=False, num_workers=8
+)
 
-train_dataset = torchvision.datasets.FashionMNIST(root='../data', train=True, transform=transform)
-val_dataset = torchvision.datasets.FashionMNIST(root='../data', train=False, transform=transform)
-train_loader = DataLoader(train_dataset, batch_size=256, shuffle=True, num_workers=8)
-val_loader = DataLoader(val_dataset, batch_size=256, shuffle=False, num_workers=8)
-
-print(f'train batch num:{len(train_loader)}, val batch num:{len(val_loader)}')
-
-model = CustomSoftmaxRegression(28*28, 10, 0.1)
+model = MLP(28*28, 256, 10, lr=0.1)
 trainer = L.Trainer(max_epochs=10, accelerator='gpu', devices=1)
-trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=val_loader)
+trainer.fit(model, train_loader, val_loader)
 
 import matplotlib.pyplot as plt
 plt.figure(figsize=(10, 6))

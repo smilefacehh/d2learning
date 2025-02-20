@@ -54,6 +54,9 @@ class LinearRegression(L.LightningModule):
         """
         super().__init__()
 
+        self.train_loss_epoches = {}
+        self.val_loss_epoches = {}
+
         self.lr = lr
         self.linear = nn.Linear(2, 1)
 
@@ -69,14 +72,14 @@ class LinearRegression(L.LightningModule):
         x, y = batch
         y_hat = self(x) # 这里调用forwar函数
         loss = nn.MSELoss()(y_hat, y)
-        self.log('train_loss', loss)
+        self.log('train_loss', loss, on_step=False, on_epoch=True)
         return loss
     
     def validation_step(self, batch, batch_idx):
         x, y = batch
         y_hat = self(x) 
         loss = nn.MSELoss()(y_hat, y)
-        self.log('val_loss', loss)
+        self.log('val_loss', loss, on_step=False, on_epoch=True)
 
 
     def configure_optimizers(self):
@@ -85,6 +88,14 @@ class LinearRegression(L.LightningModule):
     
     def get_w_b(self):
         return self.linear.weight.data, self.linear.bias.data
+    
+    def on_train_epoch_end(self):
+        avg_loss = self.trainer.callback_metrics.get('train_loss').item()
+        self.train_loss_epoches[self.trainer.current_epoch] = avg_loss
+
+    def on_validation_epoch_end(self):
+        avg_loss = self.trainer.callback_metrics.get('val_loss').item()
+        self.val_loss_epoches[self.trainer.current_epoch] = avg_loss
     
 
 def train():
@@ -96,6 +107,18 @@ def train():
     w, b = model.get_w_b()
     print(f'w err:{data_module.w - w.reshape(data_module.w.shape)}')
     print(f'b err:{data_module.b - b}')
+
+    import matplotlib.pyplot as plt
+    plt.figure(figsize=(10, 6))
+    plt.plot(model.train_loss_epoches.keys(), model.train_loss_epoches.values(), label="train_loss")
+    plt.plot(model.val_loss_epoches.keys(), model.val_loss_epoches.values(), label="val_loss")
+    plt.xlabel("epoch")
+    plt.ylabel("loss")
+    plt.title("training and validation loss")
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+
 
 def infer():
     checkpoint = './lightning_logs/version_0/checkpoints/epoch=2-step=96.ckpt'
